@@ -34,7 +34,7 @@ class _AiLogScreenState extends State<AiLogScreen> {
   Participant? selectedStudent;
   List<AiLog> logs = [];
   late _AiLogSource logSource;
-  int sortIndex = 7;
+  int sortIndex = 8;
   bool sortAsc = false;
   String message = 'Select filters and press Filter to view AI logs.';
   bool isError = false;
@@ -118,7 +118,7 @@ class _AiLogScreenState extends State<AiLogScreen> {
         isLoading = true;
         message = 'Loading AI logs...';
         isError = false;
-        sortIndex = 7;
+        sortIndex = 8;
         sortAsc = false;
         logSource.setData(logs, sortIndex, sortAsc);
       });
@@ -241,6 +241,7 @@ class _AiLogScreenState extends State<AiLogScreen> {
         TextCellValue(AiLog.getHeaderForColumn(5)),
         TextCellValue(AiLog.getHeaderForColumn(6)),
         TextCellValue(AiLog.getHeaderForColumn(7)),
+        TextCellValue(AiLog.getHeaderForColumn(8)),
       ];
       studentSheet.appendRow(studentHeaders);
       // Append each student row by mapping the values to strings.
@@ -255,6 +256,7 @@ class _AiLogScreenState extends State<AiLogScreen> {
             TextCellValue(log.getStringForColumn(5)),
             TextCellValue(log.getStringForColumn(6)),
             TextCellValue(log.getStringForColumn(7)),
+            TextCellValue(log.getStringForColumn(8)),
           ],
         );
       }
@@ -457,7 +459,11 @@ class _AiLogScreenState extends State<AiLogScreen> {
                                 label: Text(AiLog.getHeaderForColumn(6)),
                                 onSort: sort),
                             DataColumn(
+                                columnWidth: FixedColumnWidth(120),
                                 label: Text(AiLog.getHeaderForColumn(7)),
+                                onSort: sort),
+                            DataColumn(
+                                label: Text(AiLog.getHeaderForColumn(8)),
                                 onSort: sort),
                           ],
                           source: logSource,
@@ -723,6 +729,7 @@ class _AiLogSource extends DataTableSource {
           cellFor(index, 5),
           cellFor(index, 6),
           cellFor(index, 7),
+          cellFor(index, 8),
         ]);
   }
 

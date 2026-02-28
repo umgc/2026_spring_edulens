@@ -13,6 +13,7 @@ import 'package:learninglens_app/Views/iep_page.dart';
 import 'package:learninglens_app/Views/lesson_plans.dart';
 import 'package:learninglens_app/Views/nav_card.dart';
 import 'package:learninglens_app/Views/program_assessment_view.dart';
+import 'package:learninglens_app/Views/roleplay_feature_screen.dart';
 import 'package:learninglens_app/Views/student_reflections_page.dart';
 import 'package:learninglens_app/Views/user_settings.dart';
 import 'package:learninglens_app/services/local_storage_service.dart';
@@ -323,6 +324,16 @@ class TeacherDashboard extends StatelessWidget {
         'icon': Icons.videogame_asset_outlined
       },
       {
+        'title': 'Roleplay Builder',
+        'description':
+            'Configure AI personas and roleplay scenarios for assignments.',
+        'onPressed': () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (context) => RoleplayFeatureScreen()),
+            ),
+        'icon': Icons.smart_toy_outlined
+      },
+      {
         'title': 'Program Assessment',
         'description': isMoodle()
             ? 'Automatically evaluate student programming assignments.'
@@ -350,7 +361,8 @@ class TeacherDashboard extends StatelessWidget {
         {
           'title': 'Roleplay Assignment',
           'description': 'Complete AI-based roleplay assignments.',
-          'onPressed': null,
+          'onPressed': () => Navigator.push(context,
+              MaterialPageRoute(builder: (context) => RoleplayFeatureScreen())),
           'icon': Icons.smart_toy_outlined
         },
         {

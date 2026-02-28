@@ -14,6 +14,7 @@ class AiLog {
   final String prompt;
   final String response;
   final String reflection;
+  final String label;
   final LlmType model;
   final String uuid;
   LmsType lms = LocalStorageService.getSelectedClassroom();
@@ -22,7 +23,11 @@ class AiLog {
   // Simple constructor. Feedback param is optional.
   AiLog(this.course, this.assignment, this.student, this.prompt, this.response,
       this.model,
-      [this.reflection = "", this.uuid = "", LmsType? lms, DateTime? created]) {
+      [this.reflection = "",
+      this.uuid = "",
+      this.label = "general",
+      LmsType? lms,
+      DateTime? created]) {
     if (lms != null) {
       this.lms = lms;
     }
@@ -41,6 +46,7 @@ class AiLog {
       'prompt': prompt,
       'response': response,
       'reflection': reflection,
+      'label': label,
       'model': model.index,
       'lms': lms.index
     };
@@ -61,8 +67,10 @@ class AiLog {
       case 5:
         return reflection;
       case 6:
-        return model.displayName;
+        return label;
       case 7:
+        return model.displayName;
+      case 8:
         return created;
       default:
         return "";
@@ -77,7 +85,7 @@ class AiLog {
   }
 
   String getStringForColumn(int column) {
-    if (column == 7) {
+    if (column == 8) {
       return DateFormat.yMd().add_jms().format(created.toLocal());
     } else {
       return getValueForColumn(column).toString();
@@ -104,8 +112,10 @@ class AiLog {
       case 5:
         return "Reflection";
       case 6:
-        return "AI Model";
+        return "Label";
       case 7:
+        return "AI Model";
+      case 8:
         return "Created (Local)";
       default:
         return "";

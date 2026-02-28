@@ -11,6 +11,8 @@ import 'package:learninglens_app/services/local_storage_service.dart';
 
 class AILoggingSingleton {
   static final AILoggingSingleton _singleton = AILoggingSingleton._internal();
+  static const String _defaultLabel = "general";
+
   factory AILoggingSingleton() {
     return _singleton;
   }
@@ -35,34 +37,72 @@ class AILoggingSingleton {
       int lmsType,
       DateTime startDate,
       DateTime endDate) async {
-    List<AiLog> list = List.empty(growable: true);
-    int courseId = course.id;
-    int assignmentIdParam = assignment?.id ?? -1;
-    int studentIdParam = student?.id ?? -1;
+    final list = <AiLog>[];
+    final courseId = course.id;
+    final assignmentIdParam = assignment?.id ?? -1;
+    final studentIdParam = student?.id ?? -1;
     final url = Uri.parse(
         "${LocalStorageService.getAILoggingUrl()}/?command=getLogs&courseId=$courseId&assignmentId=$assignmentIdParam&studentId=$studentIdParam&lmsType=$lmsType&startDate=${getDateString(startDate)}&endDate=${getDateString(endDate)}");
+
     final response = await http.get(url);
-    final postResponse = response.body;
-    final d = jsonDecode(postResponse);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception("Failed to fetch logs: HTTP ${response.statusCode}");
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) {
+      throw Exception("Invalid logs payload format.");
+    }
+
+    final assignmentMap = <int, Assignment>{
+      for (final essay in (course.essays ?? const <Assignment>[]))
+        essay.id: essay
+    };
     final participants = await LmsFactory.getLmsService()
         .getCourseParticipants(courseId.toString());
-    for (Map m in d) {
-      Assignment a = course.essays!
-          .firstWhere((a) => a.id == int.parse(m["assignment_id"]));
-      Participant p =
-          participants.firstWhere((p) => p.id == int.parse(m["student_id"]));
+    final participantMap = <int, Participant>{
+      for (final p in participants) p.id: p
+    };
+
+    for (final row in decoded) {
+      if (row is! Map) continue;
+      final map = Map<String, dynamic>.from(row);
+
+      final assignmentId = int.tryParse(map["assignment_id"].toString());
+      final studentId = int.tryParse(map["student_id"].toString());
+      final modelIndex = int.tryParse(map["ai_model"].toString());
+      final createdAt = DateTime.tryParse(map["time"]?.toString() ?? "");
+      if (assignmentId == null ||
+          studentId == null ||
+          modelIndex == null ||
+          createdAt == null) {
+        continue;
+      }
+
+      final assignmentObj = assignmentMap[assignmentId];
+      final studentObj = participantMap[studentId];
+      if (assignmentObj == null || studentObj == null) {
+        continue;
+      }
+
+      if (modelIndex < 0 || modelIndex >= LlmType.values.length) {
+        continue;
+      }
+
       list.add(AiLog(
           course,
-          a,
-          p,
-          m["prompt"],
-          m["response"],
-          LlmType.values.elementAt(m["ai_model"]),
-          m["reflection"],
-          m["log_id"],
+          assignmentObj,
+          studentObj,
+          map["prompt"]?.toString() ?? "",
+          map["response"]?.toString() ?? "",
+          LlmType.values[modelIndex],
+          map["reflection"]?.toString() ?? "",
+          map["log_id"]?.toString() ?? "",
+          map["label"]?.toString() ?? _defaultLabel,
           LocalStorageService.getSelectedClassroom(),
-          DateTime.parse(m["time"])));
+          createdAt));
     }
+
     return list;
   }
 
@@ -77,7 +117,9 @@ class AILoggingSingleton {
     final body = jsonEncode(log.toJson());
 
     final response = await http.post(url, headers: header, body: body);
-    final postResponse = response.body;
-    return postResponse.toString();
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception("Failed to add log: HTTP ${response.statusCode}");
+    }
+    return response.body;
   }
 }

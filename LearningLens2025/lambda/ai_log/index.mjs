@@ -69,10 +69,12 @@ export const handler = async (event, context) => {
       prompt VARCHAR,
       response VARCHAR,
       reflection VARCHAR,
+      label VARCHAR,
       ai_model SMALLINT,
       lms_service SMALLINT,
       time TIMESTAMP
     );`;
+    await client`ALTER TABLE AI_LOGS ADD COLUMN IF NOT EXISTS label VARCHAR DEFAULT 'general';`;
     }
     catch (error) {
       console.error("Failed to create database table: ", error);
@@ -92,7 +94,7 @@ export const handler = async (event, context) => {
 
   async function getAllLogs(client, courseId, assignmentId, studentId, lms, startDate, endDate) {
     try {
-      return await client`SELECT log_id, student_id, assignment_id, course_id, prompt, response, reflection, ai_model, time FROM AI_LOGS WHERE
+      return await client`SELECT log_id, student_id, assignment_id, course_id, prompt, response, reflection, label, ai_model, time FROM AI_LOGS WHERE
       course_id = ${courseId} AND
       lms_service = ${lms} AND
       (${assignmentId} = -1 OR assignment_id = ${assignmentId}) AND
@@ -118,6 +120,7 @@ export const handler = async (event, context) => {
       ${log.prompt},
       ${log.response},
       ${log.reflection},
+      ${log.label ?? 'general'},
       ${log.model},
       ${log.lms},
       current_timestamp AT TIME ZONE 'UTC'
