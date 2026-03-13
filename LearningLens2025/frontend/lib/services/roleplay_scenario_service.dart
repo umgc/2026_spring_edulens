@@ -9,13 +9,13 @@ class RoleplayScenarioService {
   static List<RoleplayScenario> getScenarios() {
     final raw = LocalStorageService.getString(_key);
     if (raw == null || raw.trim().isEmpty) {
-      return const [];
+      return <RoleplayScenario>[];
     }
 
     try {
       final parsed = jsonDecode(raw);
       if (parsed is! List) {
-        return const [];
+        return <RoleplayScenario>[];
       }
       return parsed
           .whereType<Map>()
@@ -23,7 +23,7 @@ class RoleplayScenarioService {
           .toList()
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     } catch (_) {
-      return const [];
+      return <RoleplayScenario>[];
     }
   }
 

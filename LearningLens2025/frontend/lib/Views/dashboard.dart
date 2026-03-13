@@ -383,22 +383,33 @@ class TeacherDashboard extends StatelessWidget {
       ];
     }
 
-    return ConstrainedBox(
-      constraints: BoxConstraints(maxWidth: 1200),
-      child: Wrap(
-        spacing: 12,
-        runSpacing: 12,
-        alignment: WrapAlignment.center,
-        children: buttonData
-            .map((data) => SizedBox(
-                width: 350,
-                height: 140,
-                child: NavigationCard(
-                    title: data['title'],
-                    icon: data['icon'],
-                    description: data['description'],
-                    onPressed: data['onPressed'])))
-            .toList(),
+    return FocusTraversalGroup(
+      policy: OrderedTraversalPolicy(),
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: 1200),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          alignment: WrapAlignment.center,
+          children: buttonData.asMap().entries.map((entry) {
+            final index = entry.key;
+            final data = entry.value;
+
+            return SizedBox(
+              width: 350,
+              height: 140,
+              child: NavigationCard(
+                key: ValueKey('dashboard-nav-${data['title']}'),
+                title: data['title'],
+                icon: data['icon'],
+                description: data['description'],
+                onPressed: data['onPressed'],
+                focusOrder: index.toDouble(),
+                autofocus: index == 0 && data['onPressed'] != null,
+              ),
+            );
+          }).toList(),
+        ),
       ),
     );
   }
