@@ -11,6 +11,7 @@ import 'package:learninglens_app/services/local_storage_service.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import "package:learninglens_app/Views/view_quiz.dart";
+import 'package:learninglens_app/Views/edulense_requirement_widgets.dart';
 
 class AssessmentsView extends StatefulWidget {
   AssessmentsView({super.key, this.quizID = 0, this.courseID = 0});
@@ -29,6 +30,14 @@ class _AssessmentsState extends State<AssessmentsView> {
   Future<FormData>? _formDataFuture;
   GoogleLmsService googleLmsService = GoogleLmsService();
 
+  // Added for Spring 2026 evaluation requirements: these teacher-configurable
+  // qualitative feedback controls surface tone, voice, detail, and alignment
+  // choices without removing the existing assessment viewer behavior.
+  String _selectedFeedbackTone = 'Supportive';
+  String _selectedFeedbackVoice = 'Instructor coach';
+  String _selectedFeedbackDetail = 'Balanced';
+  String _selectedFeedbackMode = 'Supportive + critical blend';
+
   @override
   void initState() {
     super.initState();
@@ -45,6 +54,114 @@ class _AssessmentsState extends State<AssessmentsView> {
     setState(() {
       quizzes = getAllQuizzes();
     });
+  }
+
+  // Added requirement helper: determine whether the current assessment has a
+  // rubric-like structure available so the feedback summary can advertise
+  // rubric-aligned vs criteria-referenced behavior.
+  bool get _supportsRubricAlignment => selectedQuiz?.description?.isNotEmpty ?? false;
+
+  Widget _buildEvaluationRequirementPanel() {
+    return Column(
+      children: [
+        EduLenseEvaluationConfigurationCard(
+          tone: _selectedFeedbackTone,
+          voice: _selectedFeedbackVoice,
+          detailLevel: _selectedFeedbackDetail,
+          feedbackMode: _selectedFeedbackMode,
+          supportsRubricAlignment: _supportsRubricAlignment,
+        ),
+        const SizedBox(height: 12),
+        Card(
+          elevation: 0,
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Qualitative Feedback Controls',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: _selectedFeedbackTone,
+                  decoration: const InputDecoration(
+                    labelText: 'Tone',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Supportive', child: Text('Supportive')),
+                    DropdownMenuItem(value: 'Neutral', child: Text('Neutral')),
+                    DropdownMenuItem(value: 'Direct', child: Text('Direct')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _selectedFeedbackTone = value);
+                  },
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: _selectedFeedbackVoice,
+                  decoration: const InputDecoration(
+                    labelText: 'Voice',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Instructor coach', child: Text('Instructor coach')),
+                    DropdownMenuItem(value: 'Academic reviewer', child: Text('Academic reviewer')),
+                    DropdownMenuItem(value: 'Encouraging mentor', child: Text('Encouraging mentor')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _selectedFeedbackVoice = value);
+                  },
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: _selectedFeedbackDetail,
+                  decoration: const InputDecoration(
+                    labelText: 'Level of detail',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Brief', child: Text('Brief')),
+                    DropdownMenuItem(value: 'Balanced', child: Text('Balanced')),
+                    DropdownMenuItem(value: 'Detailed', child: Text('Detailed')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _selectedFeedbackDetail = value);
+                  },
+                ),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: _selectedFeedbackMode,
+                  decoration: const InputDecoration(
+                    labelText: 'Feedback style',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'Supportive + critical blend', child: Text('Supportive + critical blend')),
+                    DropdownMenuItem(value: 'Mostly supportive', child: Text('Mostly supportive')),
+                    DropdownMenuItem(value: 'Mostly critical', child: Text('Mostly critical')),
+                  ],
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() => _selectedFeedbackMode = value);
+                  },
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   @override
@@ -137,9 +254,21 @@ class _AssessmentsState extends State<AssessmentsView> {
                                 ? Center(
                                     child:
                                         Text('Select a quiz to view details'))
-                                : isMoodle()
-                                    ? _buildMoodleContent()
-                                    : _buildGoogleContent(),
+                                : SingleChildScrollView(
+                                    padding: const EdgeInsets.all(8.0),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                                      children: [
+                                        // Added requirement panel: teacher-facing
+                                        // qualitative feedback controls and summary.
+                                        _buildEvaluationRequirementPanel(),
+                                        const SizedBox(height: 12),
+                                        isMoodle()
+                                            ? _buildMoodleContent()
+                                            : _buildGoogleContent(),
+                                      ],
+                                    ),
+                                  ),
                           ),
                         ],
                       );
@@ -155,12 +284,12 @@ class _AssessmentsState extends State<AssessmentsView> {
   }
 
   Widget _buildMoodleContent() {
-    return Expanded(
-      flex: 2,
-      child: selectedQuiz == null && widget.quizID == 0
-          ? Center(child: Text('Select a quiz to view details'))
-          : ViewQuiz(quizId: selectedQuiz?.id ?? widget.quizID),
-    );
+    return selectedQuiz == null && widget.quizID == 0
+        ? Center(child: Text('Select a quiz to view details'))
+        : SizedBox(
+            height: 700,
+            child: ViewQuiz(quizId: selectedQuiz?.id ?? widget.quizID),
+          );
   }
 
   Widget _buildGoogleContent() {

@@ -62,6 +62,7 @@ import 'package:learninglens_app/services/LLMContextBuilder.dart';
 import 'package:learninglens_app/services/local_storage_service.dart';
 import 'package:learninglens_app/services/prompt_builder_service.dart';
 import 'package:learninglens_app/Api/llm/local_llm_service.dart'; // local llm
+import 'package:learninglens_app/Views/edulense_requirement_widgets.dart';
 import 'package:flutter/foundation.dart';
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -388,6 +389,12 @@ class _EssayAssistantState extends State<EssayAssistant> {
   PreBuiltPrompt? _selectedPrompt; // prompt within a mode (dropdown)
   late LlmType _selectedLLM; // your enum (with .displayName)
   double _temperature = 0.7; // 0.0–2.0 typical; start reasonable
+
+  // ---------------- Spring 2026 workflow / literacy additions ----------------
+  // Added to support clearer workflow stage markers, AI use-level guidance,
+  // and embedded micro-reflection prompts without removing existing behavior.
+  String _selectedAiUseLevel = 'Hinting only';
+  String _microReflectionAnswer = '';
 
   // Pre-built prompts available for each mode
   final Map<AiMode, Map<String, PreBuiltPrompt>> _promptsByMode = {
@@ -1243,6 +1250,84 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
     }
   }
 
+  // -------------------------------------------------------------------------
+  // Added requirement helper: determine which workflow stage should be shown as
+  // current in the UI. This supports the updated task-based workflow markers.
+  // -------------------------------------------------------------------------
+  String get _currentWorkflowStageTitle {
+    if (!_sessionActive) return 'Understand prompt';
+    if (_mode == AiMode.brainstorm) return 'Plan';
+    if (_mode == AiMode.draftOutline) return 'Draft';
+    if (_mode == AiMode.revise) return 'Revise';
+    if (_microReflectionAnswer.trim().isNotEmpty) return 'Reflect';
+    return 'Understand prompt';
+  }
+
+  // -------------------------------------------------------------------------
+  // Added requirement helper: cycle micro-reflection prompts so the student is
+  // nudged to justify AI use and critically engage with suggestions.
+  // -------------------------------------------------------------------------
+  String get _microReflectionPrompt {
+    switch (_mode) {
+      case AiMode.brainstorm:
+        return 'Integrity nudge: which idea from the AI will you keep, change, or reject, and why?';
+      case AiMode.draftOutline:
+        return 'Micro-reflection: how will you turn this outline into your own argument and evidence?';
+      case AiMode.revise:
+        return 'Micro-reflection: which revision advice improves your draft, and what will you ignore?';
+      case AiMode.assistant:
+        return 'AI literacy check: what part of the final work still needs your own judgment?';
+    }
+  }
+
+  List<EduLenseWorkflowStage> _buildWorkflowStages() {
+    final current = _currentWorkflowStageTitle;
+    final bool hasChat = _messages.isNotEmpty;
+    final bool hasDraftText = _quillDraftController.document.toPlainText().trim().isNotEmpty;
+    final bool hasReflection = _microReflectionAnswer.trim().isNotEmpty;
+    final stages = <Map<String, dynamic>>[
+      {
+        'title': 'Understand prompt',
+        'description': 'Review the assignment, due date, and expectations before asking the AI for help.',
+        'complete': _sessionActive,
+      },
+      {
+        'title': 'Plan',
+        'description': 'Use brainstorming to explore ideas, sources, and possible directions.',
+        'complete': hasChat && (_mode != AiMode.brainstorm),
+      },
+      {
+        'title': 'Draft',
+        'description': 'Move into outline building and drafting in the editor using your own writing.',
+        'complete': hasDraftText && _mode == AiMode.revise,
+      },
+      {
+        'title': 'Revise',
+        'description': 'Refine structure, clarity, citations, and argument quality.',
+        'complete': _mode == AiMode.revise && hasChat,
+      },
+      {
+        'title': 'Reflect',
+        'description': 'Explain why you accepted, changed, or rejected AI suggestions.',
+        'complete': hasReflection,
+      },
+      {
+        'title': 'Submit',
+        'description': 'Finalize once the draft is your own and ready for review.',
+        'complete': _currentSession != null && _statusOf(_currentSession!.essay) == EssayStatus.submitted,
+      },
+    ];
+
+    return stages
+        .map((stage) => EduLenseWorkflowStage(
+              title: stage['title'] as String,
+              description: stage['description'] as String,
+              isComplete: stage['complete'] as bool,
+              isCurrent: stage['title'] == current,
+            ))
+        .toList();
+  }
+
   /* ──────────────────────────────────────────────────────────────────────────
    * 3.6) Build Method – Main layout:
    *       [Left: Essay list] | [Center: Chat] | [Right: AI controls]
@@ -1353,6 +1438,34 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
                   borderRadius: BorderRadius.circular(16),
                   child: Column(
                     children: [
+                      // Added requirement block: workflow stage tracker +
+                      // provenance legend + embedded reflection prompt. This
+                      // sits above the chat so students see the workflow every
+                      // time they interact with the assistant.
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                        child: Column(
+                          children: [
+                            EduLenseWorkflowTrackerCard(
+                              stages: _buildWorkflowStages(),
+                              aiUseLevel: _selectedAiUseLevel,
+                              onAiUseLevelChanged: (value) {
+                                if (value == null) return;
+                                setState(() => _selectedAiUseLevel = value);
+                              },
+                              microReflectionPrompt: _microReflectionPrompt,
+                              microReflectionAnswer: _microReflectionAnswer,
+                              onMicroReflectionChanged: (value) {
+                                setState(() => _microReflectionAnswer = value);
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            const EduLenseProvenanceLegendCard(),
+                            const SizedBox(height: 8),
+                          ],
+                        ),
+                      ),
+
                       // ------------- Messages list -------------
                       Expanded(
                         child: ListView.builder(
@@ -1697,6 +1810,12 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
 
                     const SizedBox(height: 12),
                     const Divider(height: 1),
+                    const SizedBox(height: 8),
+
+                    // Added requirement reminder in the control rail so the
+                    // student can always see the current provenance labels.
+                    const EduLenseProvenanceLegendCard(),
+
                     const SizedBox(height: 8),
 
                     // ───────────────────────── LLM picker ─────────────────────────
