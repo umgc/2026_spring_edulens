@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:learninglens_app/Views/essay_assistant.dart';
 import 'package:learninglens_app/beans/assignment.dart';
 import 'package:learninglens_app/beans/chatLog.dart';
+import 'package:learninglens_app/beans/workflow_support.dart';
 
 // class to represent an essay builder session
 class EssaySession {
@@ -15,6 +16,14 @@ class EssaySession {
   List<dynamic>? draftDeltaOps; // Quill delta for essay draft
   List<dynamic>? notesDeltaOps; // Quill delta for notes
 
+  // EDU-LENSE 2026 SPRING ADDITIONS:
+  // Persist workflow markers, integrity decisions, and first-class visual assets
+  // directly inside the essay session so they can be exported/reviewed later.
+  String workflowStageKey;
+  List<WorkflowStepLog> workflowSteps;
+  List<VisualMaterialAsset> visualAssets;
+  Map<String, String> integrityResponses;
+
   // constructor
   EssaySession({
     required this.essay,
@@ -25,7 +34,14 @@ class EssaySession {
     String? notesText,
     this.draftDeltaOps,
     this.notesDeltaOps,
-  })  : id = id ?? essay.id.toString(),
+    this.workflowStageKey = 'understand',
+    List<WorkflowStepLog>? workflowSteps,
+    List<VisualMaterialAsset>? visualAssets,
+    Map<String, String>? integrityResponses,
+  })  : workflowSteps = List<WorkflowStepLog>.from(workflowSteps ?? const []),
+        visualAssets = List<VisualMaterialAsset>.from(visualAssets ?? const []),
+        integrityResponses = Map<String, String>.from(integrityResponses ?? const {}),
+        id = id ?? essay.id.toString(),
         chatLog = List<ChatTurn>.from(chatLog ?? const []);
 
   // method to convert the object to json for storage
@@ -46,6 +62,10 @@ class EssaySession {
         'notesText': notesText,
         'draftDeltaOps': draftDeltaOps,
         'notesDeltaOps': notesDeltaOps,
+        'workflowStageKey': workflowStageKey,
+        'workflowSteps': workflowSteps.map((e) => e.toJson()).toList(),
+        'visualAssets': visualAssets.map((e) => e.toJson()).toList(),
+        'integrityResponses': integrityResponses,
       });
   // factory constructor to rebuild session from JSON
   factory EssaySession.fromJson(Map<String, dynamic> json) {
@@ -74,6 +94,17 @@ class EssaySession {
           [],
       draftDeltaOps: json['draftDeltaOps'],
       notesDeltaOps: json['notesDeltaOps'],
+      workflowStageKey: json['workflowStageKey']?.toString() ?? 'understand',
+      workflowSteps: (json['workflowSteps'] as List?)
+              ?.map((e) => WorkflowStepLog.fromJson(Map<String, dynamic>.from(e)))
+              .toList() ??
+          [],
+      visualAssets: (json['visualAssets'] as List?)
+              ?.map((e) => VisualMaterialAsset.fromJson(Map<String, dynamic>.from(e)))
+              .toList() ??
+          [],
+      integrityResponses: Map<String, String>.from(
+          (json['integrityResponses'] as Map?)?.map((k, v) => MapEntry(k.toString(), v.toString())) ?? const {}),
     );
   }
 }

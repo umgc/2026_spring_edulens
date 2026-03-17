@@ -33,6 +33,7 @@ import 'package:learninglens_app/beans/course.dart';
 import 'package:learninglens_app/beans/assignment.dart';
 import 'package:learninglens_app/beans/participant.dart';
 import 'package:learninglens_app/beans/quiz.dart';
+import 'package:learninglens_app/beans/workflow_support.dart';
 
 // Import the APIs for the Learning Lens Model (LLM).
 import 'package:learninglens_app/Api/llm/enum/llm_enum.dart';
@@ -43,7 +44,6 @@ import 'package:learninglens_app/services/local_storage_service.dart';
 import 'dart:convert';
 
 import 'package:url_launcher/url_launcher.dart';
-import 'package:learninglens_app/Views/edulense_requirement_widgets.dart';
 
 import 'package:learninglens_app/Api/llm/local_llm_service.dart'; // local llm
 import 'package:flutter/foundation.dart';
@@ -1409,72 +1409,107 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Added Spring 2026 analytics helper methods. These generate a lightweight
-  // actionable snapshot so the dashboard explicitly surfaces class-level and
-  // student-level insights tied to lesson adjustment and intervention needs.
+  // EDU-LENSE 2026 SPRING ADDITIONS:
+  // Actionable insight cards provide class-level and student-level summaries in
+  // plain language so teachers can quickly spot misconceptions, recurring issues,
+  // and possible over-reliance indicators without replacing existing analytics.
   // ---------------------------------------------------------------------------
-  double? _computeAverageGrade() {
-    if (_studentBreakdown.isEmpty) return null;
-    final grades = _studentBreakdown
-        .map((row) => double.tryParse((row['avgGrade']?.toString() ?? '').replaceAll('%', '')))
-        .whereType<double>()
-        .toList();
-    if (grades.isEmpty) return null;
-    final total = grades.fold<double>(0, (sum, value) => sum + value);
-    return total / grades.length;
-  }
+  List<ActionableInsight> _buildActionableInsights() {
+    final insights = <ActionableInsight>[];
 
-  List<String> _buildClassLevelInsights() {
-    final insights = <String>[];
-    final average = _computeAverageGrade();
-    if (_selectedAssessment != null) {
-      insights.add('Current focus is ${_selectedAssessment!.name} (${_selectedAssessment!.type.toUpperCase()}); use this report to adjust the next lesson before assigning new work.');
-    }
-    if (average != null) {
-      if (average < 70) {
-        insights.add('Average performance is below 70%, which suggests a broad reteach opportunity for the whole class.');
-      } else if (average < 85) {
-        insights.add('Average performance is in the mid range, so targeted mini-lessons may help close specific gaps.');
-      } else {
-        insights.add('Average performance is strong; consider extension or enrichment for students ready to move further.');
+    if (_studentBreakdown.isNotEmpty) {
+      final grades = _studentBreakdown
+          .map((e) => int.tryParse(e['avgGrade'].toString().replaceAll('%', '')) ?? 0)
+          .toList();
+      final lowCount = grades.where((g) => g < 70).length;
+      final highCount = grades.where((g) => g >= 85).length;
+      final avg = grades.isEmpty ? 0 : grades.reduce((a, b) => a + b) / grades.length;
+
+      insights.add(ActionableInsight(
+        title: 'Class-Level Performance Snapshot',
+        description:
+            'Average visible score is ${avg.toStringAsFixed(1)}%. ${highCount} students are currently at or above 85%, while ${lowCount} students are below 70%. Use this to target reteaching and intervention planning.',
+        audience: 'class',
+      ));
+
+      final atRisk = _studentBreakdown.take(3).toList().reversed.toList();
+      if (atRisk.isNotEmpty) {
+        insights.add(ActionableInsight(
+          title: 'Student-Level Intervention Watchlist',
+          description:
+              atRisk.map((s) => '${s['studentName']} (${s['avgGrade']})').join(', '),
+          audience: 'student',
+        ));
       }
     }
-    if (isQuiz() && _questionBreakdown.isNotEmpty) {
-      final weakest = _questionBreakdown.reduce(
-        (a, b) => computePercentCorrect(a) < computePercentCorrect(b) ? a : b,
-      );
-      insights.add('Weakest quiz area appears to be "${weakest.questionType}" with ${computePercentCorrect(weakest).toStringAsFixed(1)}% correct.');
+
+    if (_aiAnalysisFail.isNotEmpty && _aiAnalysisFail.first['Summary'] != null) {
+      insights.add(ActionableInsight(
+        title: 'Common Misunderstanding Signal',
+        description: _aiAnalysisFail.first['Summary'].toString(),
+        audience: 'class',
+      ));
     }
-    if (_studentBreakdown.length >= 3) {
-      final lowCount = _studentBreakdown
-          .where((row) => (double.tryParse((row['avgGrade']?.toString() ?? '').replaceAll('%', '')) ?? 0) < 70)
-          .length;
-      insights.add('$lowCount of ${_studentBreakdown.length} students are currently below 70%, which can guide intervention grouping.');
+
+    if (_aiAnalysisAi.isNotEmpty && _aiAnalysisAi.first['Summary'] != null) {
+      insights.add(ActionableInsight(
+        title: 'AI Use / Over-Reliance Indicator',
+        description:
+            _aiAnalysisAi.first['Summary'].toString() +
+                ' Review this alongside reflections to distinguish bounded support from over-reliance.',
+        audience: 'teacher',
+      ));
     }
+
+    if (insights.isEmpty) {
+      insights.add(const ActionableInsight(
+        title: 'No actionable insights yet',
+        description:
+            'Generate a report or run AI analysis to populate class-level misunderstandings, student trends, and intervention-oriented summaries.',
+        audience: 'teacher',
+      ));
+    }
+
     return insights;
   }
 
-  List<String> _buildStudentLevelInsights() {
-    final insights = <String>[];
-    if (_selectedStudent != null) {
-      final grade = double.tryParse((_selectedStudent!['avgGrade']?.toString() ?? '').replaceAll('%', ''));
-      final studentName = _selectedStudent!['studentName']?.toString() ?? 'Selected student';
-      insights.add(
-        '$studentName is selected for individual review${grade == null ? '' : ' with a current grade of ${grade.toStringAsFixed(1)}%'}.'
-      );
-      if (_studentCourseData.isNotEmpty) {
-        insights.add('Use the Student Detail panel to look for recurring patterns across submissions before assigning follow-up support.');
-      }
-    } else {
-      insights.add('Select a student row to generate more personalized intervention insights in context.');
-    }
-    if (_studentCourseData.isNotEmpty) {
-      insights.add('Student trend history is loaded, so teachers can compare this assessment against earlier performance and participation patterns.');
-    }
-    if (_aiAnalysisStudent.isNotEmpty) {
-      insights.add('AI student trend analysis is available below and can be exported for teacher review.');
-    }
-    return insights;
+  Widget _buildActionableInsightSection() {
+    final insights = _buildActionableInsights();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Actionable Teacher + Student Insights',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: insights
+              .map((insight) => SizedBox(
+                    width: 360,
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(insight.title,
+                                style: const TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 6),
+                            Text('Audience: ${insight.audience}'),
+                            const SizedBox(height: 6),
+                            Text(insight.description),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ))
+              .toList(),
+        ),
+      ],
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -1516,15 +1551,8 @@ class _AnalyticsPageState extends State<AnalyticsPage> {
             ),
           ),
           const SizedBox(height: 20),
-          // Added requirement card: explicit actionable analytics snapshot for
-          // both class-level and student-level intervention use cases.
-          EduLenseActionableInsightsCard(
-            totalStudents: _studentBreakdown.length,
-            averageGrade: _computeAverageGrade(),
-            assignmentType: _selectedAssessment?.type.toUpperCase() ?? 'N/A',
-            classInsights: _buildClassLevelInsights(),
-            studentInsights: _buildStudentLevelInsights(),
-          ),
+          _buildActionableInsightSection(),
+          const SizedBox(height: 20),
           // 2x2 grid view.
           _buildMainGrid(),
           // AI Analysis table below the grid with an export button.

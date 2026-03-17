@@ -11,7 +11,7 @@ import 'package:learninglens_app/services/local_storage_service.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 import "package:learninglens_app/Views/view_quiz.dart";
-import 'package:learninglens_app/Views/edulense_requirement_widgets.dart';
+import 'package:learninglens_app/beans/workflow_support.dart';
 
 class AssessmentsView extends StatefulWidget {
   AssessmentsView({super.key, this.quizID = 0, this.courseID = 0});
@@ -30,14 +30,6 @@ class _AssessmentsState extends State<AssessmentsView> {
   Future<FormData>? _formDataFuture;
   GoogleLmsService googleLmsService = GoogleLmsService();
 
-  // Added for Spring 2026 evaluation requirements: these teacher-configurable
-  // qualitative feedback controls surface tone, voice, detail, and alignment
-  // choices without removing the existing assessment viewer behavior.
-  String _selectedFeedbackTone = 'Supportive';
-  String _selectedFeedbackVoice = 'Instructor coach';
-  String _selectedFeedbackDetail = 'Balanced';
-  String _selectedFeedbackMode = 'Supportive + critical blend';
-
   @override
   void initState() {
     super.initState();
@@ -54,114 +46,6 @@ class _AssessmentsState extends State<AssessmentsView> {
     setState(() {
       quizzes = getAllQuizzes();
     });
-  }
-
-  // Added requirement helper: determine whether the current assessment has a
-  // rubric-like structure available so the feedback summary can advertise
-  // rubric-aligned vs criteria-referenced behavior.
-  bool get _supportsRubricAlignment => selectedQuiz?.description?.isNotEmpty ?? false;
-
-  Widget _buildEvaluationRequirementPanel() {
-    return Column(
-      children: [
-        EduLenseEvaluationConfigurationCard(
-          tone: _selectedFeedbackTone,
-          voice: _selectedFeedbackVoice,
-          detailLevel: _selectedFeedbackDetail,
-          feedbackMode: _selectedFeedbackMode,
-          supportsRubricAlignment: _supportsRubricAlignment,
-        ),
-        const SizedBox(height: 12),
-        Card(
-          elevation: 0,
-          margin: EdgeInsets.zero,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Qualitative Feedback Controls',
-                  style: TextStyle(fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<String>(
-                  value: _selectedFeedbackTone,
-                  decoration: const InputDecoration(
-                    labelText: 'Tone',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'Supportive', child: Text('Supportive')),
-                    DropdownMenuItem(value: 'Neutral', child: Text('Neutral')),
-                    DropdownMenuItem(value: 'Direct', child: Text('Direct')),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _selectedFeedbackTone = value);
-                  },
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: _selectedFeedbackVoice,
-                  decoration: const InputDecoration(
-                    labelText: 'Voice',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'Instructor coach', child: Text('Instructor coach')),
-                    DropdownMenuItem(value: 'Academic reviewer', child: Text('Academic reviewer')),
-                    DropdownMenuItem(value: 'Encouraging mentor', child: Text('Encouraging mentor')),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _selectedFeedbackVoice = value);
-                  },
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: _selectedFeedbackDetail,
-                  decoration: const InputDecoration(
-                    labelText: 'Level of detail',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'Brief', child: Text('Brief')),
-                    DropdownMenuItem(value: 'Balanced', child: Text('Balanced')),
-                    DropdownMenuItem(value: 'Detailed', child: Text('Detailed')),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _selectedFeedbackDetail = value);
-                  },
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<String>(
-                  value: _selectedFeedbackMode,
-                  decoration: const InputDecoration(
-                    labelText: 'Feedback style',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                  ),
-                  items: const [
-                    DropdownMenuItem(value: 'Supportive + critical blend', child: Text('Supportive + critical blend')),
-                    DropdownMenuItem(value: 'Mostly supportive', child: Text('Mostly supportive')),
-                    DropdownMenuItem(value: 'Mostly critical', child: Text('Mostly critical')),
-                  ],
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() => _selectedFeedbackMode = value);
-                  },
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
   }
 
   @override
@@ -254,20 +138,17 @@ class _AssessmentsState extends State<AssessmentsView> {
                                 ? Center(
                                     child:
                                         Text('Select a quiz to view details'))
-                                : SingleChildScrollView(
-                                    padding: const EdgeInsets.all(8.0),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                                      children: [
-                                        // Added requirement panel: teacher-facing
-                                        // qualitative feedback controls and summary.
-                                        _buildEvaluationRequirementPanel(),
-                                        const SizedBox(height: 12),
-                                        isMoodle()
+                                : Column(
+                                    children: [
+                                      Expanded(flex: 1, child: _buildExpandedRequirementCards()),
+                                      const SizedBox(height: 8),
+                                      Expanded(
+                                        flex: 2,
+                                        child: isMoodle()
                                             ? _buildMoodleContent()
                                             : _buildGoogleContent(),
-                                      ],
-                                    ),
+                                      ),
+                                    ],
                                   ),
                           ),
                         ],
@@ -283,13 +164,115 @@ class _AssessmentsState extends State<AssessmentsView> {
     );
   }
 
+  // EDU-LENSE 2026 SPRING ADDITIONS -----------------------------------------
+  // These cards surface the newly expanded requirements in the assessment view
+  // without removing existing quiz functionality.
+  Widget _buildExpandedRequirementCards() {
+    final feedbackConfig = const EvaluationFeedbackConfig();
+    final visualAssets = const [
+      VisualMaterialAsset(
+        id: 'assessment-visual-1',
+        title: 'Assignment Diagram / Annotated Example',
+        assetType: 'annotated-example',
+        sourceLabel: 'teacher-uploaded',
+        note: 'Intended for image-rich instructions, feedback artifacts, and scenario cards.',
+      ),
+      VisualMaterialAsset(
+        id: 'assessment-visual-2',
+        title: 'Roleplay Avatar / Scenario Asset',
+        assetType: 'avatar',
+        sourceLabel: 'university-contained',
+        note: 'Reserved for secure image generation or curated classroom visuals.',
+      ),
+    ];
+
+    return SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Assessment-Aware Guidance / AI Literacy',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Added for this semester: embedded micro-reflection prompts, integrity nudges, and clearer differentiation between AI suggestions, student decisions, and student-authored work.',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Teacher-Controlled Qualitative Feedback',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  Text('Tone: ${feedbackConfig.tone}'),
+                  Text('Voice: ${feedbackConfig.voice}'),
+                  Text('Detail level: ${feedbackConfig.detailLevel}'),
+                  Text('Rubric aligned: ${feedbackConfig.rubricAligned ? 'Yes' : 'No'}'),
+                  Text('Criteria referenced: ${feedbackConfig.criteriaReferenced ? 'Yes' : 'No'}'),
+                ],
+              ),
+            ),
+          ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Visual Materials / Image Integration',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Images are now treated as first-class instructional assets that can be embedded into assignments, activities, and feedback artifacts rather than purely decorative content.',
+                  ),
+                  const SizedBox(height: 8),
+                  ...visualAssets.map((asset) => ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        leading: const Icon(Icons.image_outlined),
+                        title: Text(asset.title),
+                        subtitle: Text('${asset.assetType} • ${asset.sourceLabel}\n${asset.note}'),
+                      )),
+                ],
+              ),
+            ),
+          ),
+          Card(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Rubrics / Export Readiness',
+                      style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'This additive panel flags the semester requirements for stronger rubric templates, cleaner formatting, consistency checks, and classroom-ready exports.',
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMoodleContent() {
     return selectedQuiz == null && widget.quizID == 0
-        ? Center(child: Text('Select a quiz to view details'))
-        : SizedBox(
-            height: 700,
-            child: ViewQuiz(quizId: selectedQuiz?.id ?? widget.quizID),
-          );
+        ? const Center(child: Text('Select a quiz to view details'))
+        : ViewQuiz(quizId: selectedQuiz?.id ?? widget.quizID);
   }
 
   Widget _buildGoogleContent() {

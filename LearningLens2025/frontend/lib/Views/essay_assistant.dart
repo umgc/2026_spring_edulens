@@ -57,12 +57,12 @@ import 'package:learninglens_app/beans/chatLog.dart';
 import 'package:learninglens_app/beans/course.dart';
 import 'package:learninglens_app/beans/essay_assistant_session.dart';
 import 'package:learninglens_app/beans/participant.dart';
+import 'package:learninglens_app/beans/workflow_support.dart';
 // services
 import 'package:learninglens_app/services/LLMContextBuilder.dart';
 import 'package:learninglens_app/services/local_storage_service.dart';
 import 'package:learninglens_app/services/prompt_builder_service.dart';
 import 'package:learninglens_app/Api/llm/local_llm_service.dart'; // local llm
-import 'package:learninglens_app/Views/edulense_requirement_widgets.dart';
 import 'package:flutter/foundation.dart';
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -218,6 +218,80 @@ Future<void> _copyMarkdown(BuildContext context, String mdText) async {
   }
 }
 
+
+String _workflowStageLabel(String key) {
+  return kEduLenseWorkflowStages
+      .firstWhere((stage) => stage.key == key,
+          orElse: () => kEduLenseWorkflowStages.first)
+      .label;
+}
+
+WorkflowStageInfo _workflowStageForMode(AiMode mode) {
+  switch (mode) {
+    case AiMode.brainstorm:
+      return kEduLenseWorkflowStages[1];
+    case AiMode.draftOutline:
+      return kEduLenseWorkflowStages[1];
+    case AiMode.revise:
+      return kEduLenseWorkflowStages[3];
+    case AiMode.assistant:
+      return kEduLenseWorkflowStages[2];
+  }
+}
+
+IntegrityNudge _integrityNudgeForStage(String stageKey) {
+  switch (stageKey) {
+    case 'understand':
+      return const IntegrityNudge(
+        title: 'AI Use Level: Hinting',
+        prompt:
+            'Before accepting help, write what the prompt is asking in your own words and identify one thing you still need to figure out yourself.',
+        aiUseLevel: 'Hinting',
+      );
+    case 'plan':
+      return const IntegrityNudge(
+        title: 'AI Use Level: Planning Support',
+        prompt:
+            'Explain which outline or idea you chose and why that choice fits the assignment better than the alternatives.',
+        aiUseLevel: 'Planning Support',
+      );
+    case 'draft':
+      return const IntegrityNudge(
+        title: 'AI Use Level: Co-Drafting Guardrail',
+        prompt:
+            'Identify at least one sentence or idea that is clearly student-authored before moving forward.',
+        aiUseLevel: 'Co-Drafting',
+      );
+    case 'revise':
+      return const IntegrityNudge(
+        title: 'AI Use Level: Revision',
+        prompt:
+            'State one AI suggestion you rejected or modified, and explain why your version better fits your intent.',
+        aiUseLevel: 'Revision',
+      );
+    case 'reflect':
+      return const IntegrityNudge(
+        title: 'AI Use Level: Reflection',
+        prompt:
+            'Summarize how AI supported your learning without replacing your judgment or authorship.',
+        aiUseLevel: 'Reflection',
+      );
+    case 'submit':
+      return const IntegrityNudge(
+        title: 'AI Use Level: Submission Check',
+        prompt:
+            'Confirm that the final submission represents your own academic work and that you reviewed every AI-supported change.',
+        aiUseLevel: 'Submission Check',
+      );
+    default:
+      return const IntegrityNudge(
+        title: 'AI Use Level',
+        prompt: 'Explain what the AI did and what you did.',
+        aiUseLevel: 'General',
+      );
+  }
+}
+
 /* ────────────────────────────────────────────────────────────────────────────
  * 4) EssayAssistant Widget
  * ──────────────────────────────────────────────────────────────────────────── */
@@ -280,7 +354,9 @@ class _EssayAssistantState extends State<EssayAssistant> {
       // Clear chat messages for new session load
       _messages.clear();
       _inputCtrl.clear();
+      _integrityCtrl.text = session.integrityResponses[session.workflowStageKey] ?? '';
     });
+    _ensureDefaultVisualAssets();
 
     // Replay chat log if requested
     if (replay && _currentSession!.chatLog.isNotEmpty) {
@@ -386,15 +462,12 @@ class _EssayAssistantState extends State<EssayAssistant> {
 
   // ---------------- Right sidebar (AI controls) state ----------------
   AiMode _mode = AiMode.brainstorm; // current AI mode
+  // EDU-LENSE 2026 SPRING ADDITIONS: stores the latest integrity response
+  // entered from the workflow nudge card for teacher-visible process logging.
+  final TextEditingController _integrityCtrl = TextEditingController();
   PreBuiltPrompt? _selectedPrompt; // prompt within a mode (dropdown)
   late LlmType _selectedLLM; // your enum (with .displayName)
   double _temperature = 0.7; // 0.0–2.0 typical; start reasonable
-
-  // ---------------- Spring 2026 workflow / literacy additions ----------------
-  // Added to support clearer workflow stage markers, AI use-level guidance,
-  // and embedded micro-reflection prompts without removing existing behavior.
-  String _selectedAiUseLevel = 'Hinting only';
-  String _microReflectionAnswer = '';
 
   // Pre-built prompts available for each mode
   final Map<AiMode, Map<String, PreBuiltPrompt>> _promptsByMode = {
@@ -486,6 +559,7 @@ class _EssayAssistantState extends State<EssayAssistant> {
     _notesFocus.dispose();
     _quillNotesController.dispose();
     _quillNotesScrollController.dispose();
+    _integrityCtrl.dispose();
     super.dispose();
   }
 
@@ -525,10 +599,277 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
       ''');
   }
 
+  // EDU-LENSE 2026 SPRING ADDITIONS -----------------------------------------
+  // Workflow logging stays additive: it does not replace existing chat logs; it
+  // supplements them with teacher-friendly stage, actor, and timestamp data.
+  EssaySession? get _activeSessionSafe => _currentSession;
+
+  void _ensureDefaultVisualAssets() {
+    final session = _activeSessionSafe;
+    if (session == null || session.visualAssets.isNotEmpty) return;
+    session.visualAssets.addAll(const [
+      VisualMaterialAsset(
+        id: 'teacher-diagram-slot',
+        title: 'Teacher Diagram Slot',
+        assetType: 'diagram',
+        sourceLabel: 'teacher-uploaded',
+        note: 'Use this slot for diagrams or annotated examples attached to the assignment.',
+      ),
+      VisualMaterialAsset(
+        id: 'ai-scenario-card-slot',
+        title: 'AI Scenario Card Slot',
+        assetType: 'scenario-card',
+        sourceLabel: 'local-placeholder',
+        note: 'Reserved for classroom-safe, university-contained generated visual materials.',
+      ),
+    ]);
+  }
+
+  Future<void> _recordWorkflowStep({
+    required String actorLabel,
+    required String actionLabel,
+    required String detail,
+    String? stageKey,
+  }) async {
+    final session = _activeSessionSafe;
+    if (session == null) return;
+    _ensureDefaultVisualAssets();
+    final stage = stageKey ?? session.workflowStageKey;
+    session.workflowSteps.add(
+      WorkflowStepLog(
+        id: const Uuid().v4(),
+        stageKey: stage,
+        actorLabel: actorLabel,
+        actionLabel: actionLabel,
+        detail: detail,
+        timestamp: DateTime.now(),
+      ),
+    );
+    await _saveCurrentSessionToPrefs();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _setWorkflowStage(String stageKey) async {
+    final session = _activeSessionSafe;
+    if (session == null) return;
+    if (session.workflowStageKey == stageKey) return;
+    session.workflowStageKey = stageKey;
+    _integrityCtrl.text = session.integrityResponses[stageKey] ?? '';
+    await _recordWorkflowStep(
+      actorLabel: 'student-decision',
+      actionLabel: 'Moved workflow stage',
+      detail: 'Stage changed to ${_workflowStageLabel(stageKey)}.',
+      stageKey: stageKey,
+    );
+  }
+
+  Future<void> _saveIntegrityResponse() async {
+    final session = _activeSessionSafe;
+    if (session == null) return;
+    final value = _integrityCtrl.text.trim();
+    if (value.isEmpty) return;
+    session.integrityResponses[session.workflowStageKey] = value;
+    await _recordWorkflowStep(
+      actorLabel: 'student-decision',
+      actionLabel: 'Answered integrity nudge',
+      detail: value,
+    );
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Integrity response saved to the workflow log.')),
+      );
+    }
+  }
+
+  String _buildWorkflowExportSummary() {
+    final session = _activeSessionSafe;
+    if (session == null) return 'No active workflow.';
+    final buffer = StringBuffer()
+      ..writeln('Teacher-Friendly Workflow Summary')
+      ..writeln('Assignment: ${session.essay.name}')
+      ..writeln('Current Stage: ${_workflowStageLabel(session.workflowStageKey)}')
+      ..writeln('')
+      ..writeln('Stage Notes:');
+
+    for (final stage in kEduLenseWorkflowStages) {
+      final stageSteps = session.workflowSteps.where((s) => s.stageKey == stage.key);
+      if (stageSteps.isEmpty) continue;
+      buffer.writeln('- ${stage.label}: ${stage.prompt}');
+      for (final step in stageSteps.take(5)) {
+        buffer.writeln(
+            '  • [${step.actorLabel}] ${step.actionLabel} @ ${step.timestamp.toLocal()}: ${step.detail}');
+      }
+      final integrity = session.integrityResponses[stage.key];
+      if (integrity != null && integrity.isNotEmpty) {
+        buffer.writeln('  • Integrity note: $integrity');
+      }
+    }
+
+    if (session.visualAssets.isNotEmpty) {
+      buffer..writeln('')..writeln('Visual Materials:');
+      for (final asset in session.visualAssets) {
+        buffer.writeln(
+            '• ${asset.title} (${asset.assetType}, ${asset.sourceLabel}) — ${asset.note}');
+      }
+    }
+
+    return buffer.toString();
+  }
+
+  void _showWorkflowExportDialog() {
+    final summary = _buildWorkflowExportSummary();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Workflow Export Preview'),
+        content: SizedBox(
+          width: 720,
+          child: SingleChildScrollView(child: SelectableText(summary)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWorkflowStagePanel() {
+    final session = _activeSessionSafe;
+    final stageKey = session?.workflowStageKey ?? 'understand';
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Colors.black.withOpacity(0.06))),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.alt_route),
+              const SizedBox(width: 8),
+              Text('Workflow Stage Tracker', style: Theme.of(context).textTheme.titleMedium),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _sessionActive ? _showWorkflowExportDialog : null,
+                icon: const Icon(Icons.summarize_outlined),
+                label: const Text('Preview Export Summary'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: kEduLenseWorkflowStages.map((stage) {
+              final selected = stage.key == stageKey;
+              return ChoiceChip(
+                label: Text(stage.label),
+                selected: selected,
+                onSelected: _sessionActive ? (_) => _setWorkflowStage(stage.key) : null,
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            kEduLenseWorkflowStages
+                .firstWhere((stage) => stage.key == stageKey, orElse: () => kEduLenseWorkflowStages.first)
+                .prompt,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIntegrityNudgeCard() {
+    final session = _activeSessionSafe;
+    final stageKey = session?.workflowStageKey ?? 'understand';
+    final nudge = _integrityNudgeForStage(stageKey);
+    final prior = session?.integrityResponses[stageKey];
+    if ((prior ?? '').isNotEmpty && _integrityCtrl.text.isEmpty) {
+      _integrityCtrl.text = prior!;
+    }
+    return Card(
+      margin: const EdgeInsets.only(top: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(nudge.title, style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 4),
+            Text('Prompt: ${nudge.prompt}'),
+            const SizedBox(height: 8),
+            TextField(
+              controller: _integrityCtrl,
+              minLines: 2,
+              maxLines: 4,
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: 'Explain what the AI did, what you kept, and what you changed yourself.',
+              ),
+            ),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton.icon(
+                onPressed: _sessionActive ? _saveIntegrityResponse : null,
+                icon: const Icon(Icons.verified_outlined),
+                label: const Text('Save Integrity Note'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildVisualMaterialsCard() {
+    final session = _activeSessionSafe;
+    final assets = session?.visualAssets ?? const <VisualMaterialAsset>[];
+    return Card(
+      margin: const EdgeInsets.only(top: 12),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Visual Materials / Image Integration',
+                style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 6),
+            const Text(
+              'Images are treated as first-class instructional assets here. This panel keeps visual placeholders visible for teacher-uploaded diagrams, annotated examples, scenario cards, and future university-contained image generation.',
+            ),
+            const SizedBox(height: 8),
+            ...assets.map((asset) => ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.image_outlined),
+                  title: Text(asset.title),
+                  subtitle: Text('${asset.assetType} • ${asset.sourceLabel}\n${asset.note}'),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
 // Handle user pressing "Send" in chat input
   Future<void> _handleSendPressed(types.PartialText partial) async {
     if (partial.text.trim().isEmpty) return;
     _appendUserMessage(partial.text.trim());
+    await _recordWorkflowStep(
+      actorLabel: 'student-authored',
+      actionLabel: 'Submitted chat message',
+      detail: partial.text.trim(),
+      stageKey: _workflowStageForMode(_mode).key,
+    );
+    await _setWorkflowStage(_workflowStageForMode(_mode).key);
     _inputCtrl.clear();
 
     // Let getLLMResponse handle ALL assistant/error UI.
@@ -709,6 +1050,7 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
 
     // Log the user's turn immediately
     _currentSession!.chatLog.add(ChatTurn(role: 'user', content: userPrompt));
+    _currentSession!.workflowStageKey = _workflowStageForMode(_mode).key;
 
     final buffer = _streamBuffer..clear();
     try {
@@ -753,6 +1095,11 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
           final fullText = buffer.toString().trim();
           _finishAssistantStream(assistantIndex, fullText);
 
+          await _recordWorkflowStep(
+            actorLabel: 'ai-suggestion',
+            actionLabel: 'Generated assistant response',
+            detail: fullText,
+          );
           await _logAiInteraction(
             userMsg: userPrompt,
             systemResponse: fullText,
@@ -779,6 +1126,11 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
         _activeAssistantMsgId ??= _beginAssistantUiMessage();
         _finishAssistantStream(idx, fullText);
 
+        await _recordWorkflowStep(
+          actorLabel: 'ai-suggestion',
+          actionLabel: 'Generated assistant response',
+          detail: fullText,
+        );
         await _logAiInteraction(userMsg: userPrompt, systemResponse: fullText);
         await _saveCurrentSessionToPrefs();
         return fullText.isEmpty ? null : fullText;
@@ -876,6 +1228,13 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
       // Show a message or send a minimal placeholder
       print('Warning: Draft appears to be empty after stripping HTML tags.');
     }
+    await _recordWorkflowStep(
+      actorLabel: 'student-authored',
+      actionLabel: 'Saved draft to LMS',
+      detail: 'Saved HTML draft for ${essay.name}.',
+      stageKey: 'draft',
+    );
+
     await lms.saveAssignmentSubmissionOnlineText(
       assignId: essay.id,
       text: html,
@@ -924,6 +1283,13 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
       );
 
       await lms.submitAssignmentForGrading(assignId: essay.id);
+      await _setWorkflowStage('submit');
+      await _recordWorkflowStep(
+        actorLabel: 'student-decision',
+        actionLabel: 'Submitted assignment',
+        detail: 'Submitted ${essay.name} for grading.',
+        stageKey: 'submit',
+      );
 
       final key = _essayKeyOf(essay);
       final s = _sessions[key];
@@ -1101,6 +1467,10 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
       'notesText': session.notesText,
       'draftDeltaOps': session.draftDeltaOps,
       'notesDeltaOps': session.notesDeltaOps,
+      'workflowStageKey': session.workflowStageKey,
+      'workflowSteps': session.workflowSteps.map((e) => e.toJson()).toList(),
+      'visualAssets': session.visualAssets.map((e) => e.toJson()).toList(),
+      'integrityResponses': session.integrityResponses,
     };
   }
 
@@ -1139,6 +1509,17 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
       // If you added these fields to EssaySession, pass them in:
       draftDeltaOps: (m['draftDeltaOps'] as List?)?.toList(),
       notesDeltaOps: (m['notesDeltaOps'] as List?)?.toList(),
+      workflowStageKey: m['workflowStageKey']?.toString() ?? 'understand',
+      workflowSteps: ((m['workflowSteps'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((x) => WorkflowStepLog.fromJson(x.cast<String, dynamic>()))
+          .toList(),
+      visualAssets: ((m['visualAssets'] as List?) ?? const [])
+          .whereType<Map>()
+          .map((x) => VisualMaterialAsset.fromJson(x.cast<String, dynamic>()))
+          .toList(),
+      integrityResponses: ((m['integrityResponses'] as Map?) ?? const {})
+          .map((k, v) => MapEntry(k.toString(), v.toString())),
     );
   }
 
@@ -1248,84 +1629,6 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
       case EssayStatus.submitted:
         return 'Submitted';
     }
-  }
-
-  // -------------------------------------------------------------------------
-  // Added requirement helper: determine which workflow stage should be shown as
-  // current in the UI. This supports the updated task-based workflow markers.
-  // -------------------------------------------------------------------------
-  String get _currentWorkflowStageTitle {
-    if (!_sessionActive) return 'Understand prompt';
-    if (_mode == AiMode.brainstorm) return 'Plan';
-    if (_mode == AiMode.draftOutline) return 'Draft';
-    if (_mode == AiMode.revise) return 'Revise';
-    if (_microReflectionAnswer.trim().isNotEmpty) return 'Reflect';
-    return 'Understand prompt';
-  }
-
-  // -------------------------------------------------------------------------
-  // Added requirement helper: cycle micro-reflection prompts so the student is
-  // nudged to justify AI use and critically engage with suggestions.
-  // -------------------------------------------------------------------------
-  String get _microReflectionPrompt {
-    switch (_mode) {
-      case AiMode.brainstorm:
-        return 'Integrity nudge: which idea from the AI will you keep, change, or reject, and why?';
-      case AiMode.draftOutline:
-        return 'Micro-reflection: how will you turn this outline into your own argument and evidence?';
-      case AiMode.revise:
-        return 'Micro-reflection: which revision advice improves your draft, and what will you ignore?';
-      case AiMode.assistant:
-        return 'AI literacy check: what part of the final work still needs your own judgment?';
-    }
-  }
-
-  List<EduLenseWorkflowStage> _buildWorkflowStages() {
-    final current = _currentWorkflowStageTitle;
-    final bool hasChat = _messages.isNotEmpty;
-    final bool hasDraftText = _quillDraftController.document.toPlainText().trim().isNotEmpty;
-    final bool hasReflection = _microReflectionAnswer.trim().isNotEmpty;
-    final stages = <Map<String, dynamic>>[
-      {
-        'title': 'Understand prompt',
-        'description': 'Review the assignment, due date, and expectations before asking the AI for help.',
-        'complete': _sessionActive,
-      },
-      {
-        'title': 'Plan',
-        'description': 'Use brainstorming to explore ideas, sources, and possible directions.',
-        'complete': hasChat && (_mode != AiMode.brainstorm),
-      },
-      {
-        'title': 'Draft',
-        'description': 'Move into outline building and drafting in the editor using your own writing.',
-        'complete': hasDraftText && _mode == AiMode.revise,
-      },
-      {
-        'title': 'Revise',
-        'description': 'Refine structure, clarity, citations, and argument quality.',
-        'complete': _mode == AiMode.revise && hasChat,
-      },
-      {
-        'title': 'Reflect',
-        'description': 'Explain why you accepted, changed, or rejected AI suggestions.',
-        'complete': hasReflection,
-      },
-      {
-        'title': 'Submit',
-        'description': 'Finalize once the draft is your own and ready for review.',
-        'complete': _currentSession != null && _statusOf(_currentSession!.essay) == EssayStatus.submitted,
-      },
-    ];
-
-    return stages
-        .map((stage) => EduLenseWorkflowStage(
-              title: stage['title'] as String,
-              description: stage['description'] as String,
-              isComplete: stage['complete'] as bool,
-              isCurrent: stage['title'] == current,
-            ))
-        .toList();
   }
 
   /* ──────────────────────────────────────────────────────────────────────────
@@ -1438,34 +1741,9 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
                   borderRadius: BorderRadius.circular(16),
                   child: Column(
                     children: [
-                      // Added requirement block: workflow stage tracker +
-                      // provenance legend + embedded reflection prompt. This
-                      // sits above the chat so students see the workflow every
-                      // time they interact with the assistant.
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                        child: Column(
-                          children: [
-                            EduLenseWorkflowTrackerCard(
-                              stages: _buildWorkflowStages(),
-                              aiUseLevel: _selectedAiUseLevel,
-                              onAiUseLevelChanged: (value) {
-                                if (value == null) return;
-                                setState(() => _selectedAiUseLevel = value);
-                              },
-                              microReflectionPrompt: _microReflectionPrompt,
-                              microReflectionAnswer: _microReflectionAnswer,
-                              onMicroReflectionChanged: (value) {
-                                setState(() => _microReflectionAnswer = value);
-                              },
-                            ),
-                            const SizedBox(height: 8),
-                            const EduLenseProvenanceLegendCard(),
-                            const SizedBox(height: 8),
-                          ],
-                        ),
-                      ),
-
+                      // EDU-LENSE 2026 SPRING ADDITIONS: visible workflow stage markers
+                      // and transition prompts requested by the updated requirements.
+                      _buildWorkflowStagePanel(),
                       // ------------- Messages list -------------
                       Expanded(
                         child: ListView.builder(
@@ -1808,14 +2086,11 @@ Tip: The assistant adapts to your mode and notes, so the more context you provid
                       label: const Text('Send Prompt'),
                     ),
 
+                    _buildIntegrityNudgeCard(),
+                    _buildVisualMaterialsCard(),
+
                     const SizedBox(height: 12),
                     const Divider(height: 1),
-                    const SizedBox(height: 8),
-
-                    // Added requirement reminder in the control rail so the
-                    // student can always see the current provenance labels.
-                    const EduLenseProvenanceLegendCard(),
-
                     const SizedBox(height: 8),
 
                     // ───────────────────────── LLM picker ─────────────────────────
