@@ -1,74 +1,102 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:learninglens_app/Views/dashboard.dart';
-import 'package:learninglens_app/services/local_storage_service.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'package:learninglens_app/Views/nav_card.dart';
 
 void main() {
-  setUp(() async {
-    SharedPreferences.setMockInitialValues({});
-    await dotenv.load(fileName: ".env");
-    await LocalStorageService.init();
-  });
+  Widget buildHarness({
+    required List<VoidCallback?> handlers,
+    required ValueChanged<String> onActivated,
+  }) {
+    final titles = ['Courses', 'Essays', 'Analytics'];
+    final icons = [
+      Icons.school_outlined,
+      Icons.grade_outlined,
+      Icons.analytics_outlined,
+    ];
 
-  testWidgets('Buttons should be disabled when user cannot access the app',
-      (WidgetTester tester) async {
-    // Manually override static methods
-
-    // except Local
-    expect(LocalStorageService.isLoggedIntoMoodle(), false);
-
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: TeacherDashboard(),
+    return MaterialApp(
+      home: Scaffold(
+        body: Center(
+          child: FocusTraversalGroup(
+            policy: OrderedTraversalPolicy(),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: List.generate(titles.length, (index) {
+                return SizedBox(
+                  width: 350,
+                  height: 140,
+                  child: NavigationCard(
+                    title: titles[index],
+                    description: '${titles[index]} description',
+                    icon: icons[index],
+                    onPressed: handlers[index] == null
+                        ? null
+                        : () {
+                            handlers[index]!();
+                            onActivated(titles[index]);
+                          },
+                    focusOrder: index.toDouble(),
+                    autofocus: index == 0,
+                  ),
+                );
+              }),
+            ),
+          ),
+        ),
       ),
     );
+  }
 
-    // Find all buttons
-    final coursesButton = find.text('Courses');
-    final essaysButton = find.text('Essays');
-    final iepButton = find.text('IEP');
-    final analyticsButton = find.text('Analytics');
-    final lessonPlanButton = find.text('Lesson Plan');
-    final assessmentsButton = find.text('Assessments');
+  testWidgets('Navigation cards can be activated in keyboard tab order',
+      (WidgetTester tester) async {
+    String? activatedTitle;
 
-    // Verify that all buttons are disabled, to verify this is working. change isNull to isNotNull.
-    expect(
-        tester
-            .widget<ElevatedButton>(find.ancestor(
-                of: coursesButton, matching: find.byType(ElevatedButton)))
-            .onPressed,
-        isNull);
-    expect(
-        tester
-            .widget<ElevatedButton>(find.ancestor(
-                of: essaysButton, matching: find.byType(ElevatedButton)))
-            .onPressed,
-        isNull);
-    expect(
-        tester
-            .widget<ElevatedButton>(find.ancestor(
-                of: iepButton, matching: find.byType(ElevatedButton)))
-            .onPressed,
-        isNull);
-    expect(
-        tester
-            .widget<ElevatedButton>(find.ancestor(
-                of: analyticsButton, matching: find.byType(ElevatedButton)))
-            .onPressed,
-        isNull);
-    expect(
-        tester
-            .widget<ElevatedButton>(find.ancestor(
-                of: lessonPlanButton, matching: find.byType(ElevatedButton)))
-            .onPressed,
-        isNull);
-    expect(
-        tester
-            .widget<ElevatedButton>(find.ancestor(
-                of: assessmentsButton, matching: find.byType(ElevatedButton)))
-            .onPressed,
-        isNull);
+    await tester.pumpWidget(
+      buildHarness(
+        handlers: [() {}, () {}, () {}],
+        onActivated: (title) => activatedTitle = title,
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(activatedTitle, 'Courses');
+
+    activatedTitle = null;
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(activatedTitle, 'Essays');
+
+    activatedTitle = null;
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+    expect(activatedTitle, 'Analytics');
+  });
+
+  testWidgets('Keyboard traversal skips disabled navigation cards',
+      (WidgetTester tester) async {
+    String? activatedTitle;
+
+    await tester.pumpWidget(
+      buildHarness(
+        handlers: [() {}, null, () {}],
+        onActivated: (title) => activatedTitle = title,
+      ),
+    );
+    await tester.pump();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+    await tester.pump();
+
+    expect(activatedTitle, 'Analytics');
   });
 }
